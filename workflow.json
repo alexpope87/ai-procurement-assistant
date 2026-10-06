@@ -1,0 +1,501 @@
+{
+  "name": "AI Procurement Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "procurement-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        96,
+        -128
+      ],
+      "id": "0117a536-dad3-4219-a957-4a2b68c88ccf",
+      "name": "Webhook",
+      "webhookId": "cb276404-599e-4615-9cdd-7e5209d8b3b5"
+    },
+    {
+      "parameters": {
+        "tableId": "purchase_requests",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "item",
+              "fieldValue": "={{ $json.body.item }}"
+            },
+            {
+              "fieldId": "quantity",
+              "fieldValue": "={{ $json.body.quantity }}"
+            },
+            {
+              "fieldId": "budget",
+              "fieldValue": "={{ $json.body.budget }}"
+            },
+            {
+              "fieldId": "deadline",
+              "fieldValue": "={{ $json.body.deadline }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "Pending"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        256,
+        80
+      ],
+      "id": "b6adf369-b0ca-4feb-b3bd-8ab5868bbe66",
+      "name": "supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "rgXCgVjKAs2Gh0K0",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "suppliers",
+        "returnAll": true,
+        "filterType": "none"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -144
+      ],
+      "id": "57d6e1b7-fcc7-490d-b879-b141a96b265d",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "rgXCgVjKAs2Gh0K0",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a4e2dd76-41b5-4452-a844-dc589151ef8d",
+              "name": "total_cost",
+              "value": "={{ $json.unit_price * $('Webhook').item.json.body.quantity }}",
+              "type": "number"
+            },
+            {
+              "id": "c160f83d-02c0-4274-b86b-e6d528176aaf",
+              "name": "within_budget",
+              "value": "={{ ($json.unit_price * $('Webhook').item.json.body.quantity) <= $('Webhook').item.json.body.budget }}",
+              "type": "boolean"
+            },
+            {
+              "id": "591cffe8-37fe-46f8-8367-2e4369e265a8",
+              "name": "days_until_deadline",
+              "value": "={{ Math.ceil(DateTime.fromISO($('Webhook').item.json.body.deadline).diff($now, 'days').days) }}",
+              "type": "number"
+            },
+            {
+              "id": "a6a0154d-a3c1-4230-8b24-a374f4616380",
+              "name": "within_deadline",
+              "value": "={{ $json.delivery_days <= Math.ceil(DateTime.fromISO($('Webhook').item.json.body.deadline).diff($now, 'days').days) }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        560,
+        80
+      ],
+      "id": "194a091b-0292-4c02-aad4-e6c99263b46c",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d33a6495-957e-4380-8114-f81f48da4bfd",
+              "leftValue": "={{ $json.within_budget }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "bb731f13-7c4a-4298-847c-28fd0493a1ae",
+              "leftValue": "={{ $json.within_deadline }}",
+              "rightValue": "is true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        -112
+      ],
+      "id": "567bf356-dc1b-4e08-82a6-a3a5021fd86d",
+      "name": "Filter",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash-lite",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.5-flash-lite"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a procurement assistant.\n\nCompare the eligible suppliers below and recommend ONE supplier.\n\nRules:\n1. Recommend the supplier with the LOWEST total_cost.\n2. Only consider suppliers already provided in the eligible suppliers list.\n3. Delivery speed is only a secondary factor and should be used only if two suppliers have the same total_cost.\n4. Never choose a more expensive supplier because it delivers faster.\n5. Keep the reason short and factual.\n\nEligible suppliers:\n{{ JSON.stringify($json.suppliers) }}\n\nReturn only valid JSON in this exact format:\n\n{\n  \"recommended_supplier\": \"Supplier name\",\n  \"total_cost\": 0,\n  \"delivery_days\": 0,\n  \"reason\": \"One short sentence\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1184,
+        112
+      ],
+      "id": "6bfe69f6-60e9-4555-9867-04b06580ddd9",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "VieONtdaNq30Nlse",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "suppliers",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        -64
+      ],
+      "id": "3bbf563b-05fd-4124-9500-615a698cf83a",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "12bbc71d-729e-4490-bc44-263c350e8763",
+              "name": "recommended_supplier",
+              "value": "={{ JSON.parse($json.content.parts[0].text).recommended_supplier }}",
+              "type": "string"
+            },
+            {
+              "id": "3336709c-5e60-4d43-851e-c887e885786d",
+              "name": "recommendation_reason",
+              "value": "={{ JSON.parse($json.content.parts[0].text).reason }}",
+              "type": "string"
+            },
+            {
+              "id": "d2058749-30ef-4f29-92d5-d25fe71fdd07",
+              "name": "total_cost",
+              "value": "={{ JSON.parse($json.content.parts[0].text).total_cost }}",
+              "type": "number"
+            },
+            {
+              "id": "d30722ed-0372-4828-88ea-465388d96870",
+              "name": "delivery_days",
+              "value": "={{ JSON.parse($json.content.parts[0].text).delivery_days }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1488,
+        -48
+      ],
+      "id": "3213d3d1-0893-4ad8-990b-6f0c6bfc47ca",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "purchase_requests",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('supabase').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "recommended_supplier",
+              "fieldValue": "= {{ $json.recommended_supplier }}"
+            },
+            {
+              "fieldId": "recommendation_reason",
+              "fieldValue": "= {{ $json.recommendation_reason }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1648,
+        160
+      ],
+      "id": "063ffc3b-07e7-4579-8c13-93ba2225fab2",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "rgXCgVjKAs2Gh0K0",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  recommended_supplier: $('Edit Fields1').item.json.recommended_supplier,\n  total_cost: $('Edit Fields1').item.json.total_cost,\n  delivery_days: $('Edit Fields1').item.json.delivery_days,\n  recommendation_reason: $('Edit Fields1').item.json.recommendation_reason,\n  status: 'Pending'\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1840,
+        0
+      ],
+      "id": "aa765d2f-2606-401c-a2fb-4a293377a2b9",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "baaff25a-5742-4f2d-a950-b6dd93f25026",
+              "leftValue": "={{ $json.supplier_name }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        848,
+        112
+      ],
+      "id": "73cd1b43-e03b-4acb-bc0c-0ceb4c6604a3",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"recommended_supplier\": \"No eligible supplier\",\n  \"recommendation_reason\": \"No supplier meets the current budget and deadline requirements.\",\n  \"status\": \"No match\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1040,
+        240
+      ],
+      "id": "e59932e3-4beb-4cf6-9bca-a01e09cd2382",
+      "name": "Respond to Webhook1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "supabase": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7ce94da9-9d07-400c-8801-b17ab6b1a792",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c80684caaf4ad284acde007346c1230969d433c0fdf94f65066ccea54d4c69ee"
+  },
+  "nodeGroups": [],
+  "id": "ObDNn2eqs5rxP1kz",
+  "tags": []
+}
